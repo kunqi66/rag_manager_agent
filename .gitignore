@@ -1,0 +1,40 @@
+# Python-generated files
+__pycache__/
+*.py[oc]
+build/
+dist/
+wheels/
+*.egg-info
+
+# Virtual environments
+.venv
+
+# ===== 本项目新增 =====
+
+# 环境变量与密钥，绝不入库
+.env
+.env.*
+!.env.example
+
+# 前端
+frontend/node_modules/
+frontend/dist/
+frontend/.vite/
+pnpm-debug.log*
+
+# 容器数据卷（若使用 compose 的本地目录挂载方式）
+volumes/
+deploy/volumes/
+
+# 上传与解析的临时文件
+tmp/
+uploads/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+
+# 系统
+.DS_Store
+Thumbs.db

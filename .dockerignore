@@ -1,0 +1,23 @@
+# 本机 .venv 是 Windows 构建的，拷进 Linux 镜像会污染依赖
+.venv/
+__pycache__/
+*.py[cod]
+
+.git/
+.gitignore
+
+.env
+
+# 前端依赖与产物由 nginx 单独挂载，不进后端镜像
+frontend/node_modules/
+frontend/dist/
+
+vibecoding_doc/
+*.md
+!README.md
+
+deploy/
+nginx/
+docker-compose.yml
+.dockerignore
+Dockerfile
