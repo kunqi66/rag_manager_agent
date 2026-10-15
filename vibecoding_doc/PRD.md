@@ -274,7 +274,7 @@ sequenceDiagram
         API->>LLM: ⑤ 有权切片 + Prompt，流式生成
         LLM-->>API: token 流
         API-->>U: SSE: start / delta* / citations / done
-        API->>DB: ⑥ 异步落 qa_log
+        API->>DB: ⑥ 落 qa_session / qa_message / qa_log（同步，一次事务）
     end
 ```
 
@@ -354,10 +354,15 @@ Milvus 的 ACL 字段是**冗余副本**，存在与 MySQL 权威权限不同步
 | `delta` | `{content}` | 增量文本分片，可能多帧 |
 | `citations` | `{items: [{document_id, title, chunk_id, heading_path, score}]}` | 引用溯源列表 |
 | `blocked` | `{count, titles?}` | 权限受限提示 |
-| `done` | `{latency_ms, token_in, token_out, faq_hit}` | 结束帧，附带统计 |
+| `done` | `{latency_ms, token_in, token_out, faq_hit, llm_called}` | 结束帧，附带统计。`llm_called` 让前端能区分「FAQ 直出」与「模型正常应答但产出 0 token」（字典 §9 #107） |
 | `error` | `{code, message}` | 异常终止 |
 
 > `blocked` 事件排在 `citations` 之后、`done` 之前。
+>
+> ✅ **已定（2026-10-14）**：`done` 增 `llm_called: bool`（见 `P1-11-be-search-qa`）。
+> 起因是原型要显示「未调用生成模型」，而原 4 个字段推不出来——前端只能用
+> `token_out === 0 && !faq_hit` 推断，在「模型正常应答但恰好产出 0 token」时**误报**。
+> 本表与字典 §7 已同步。
 
 前端实现注意：**必须用 `fetch` + `ReadableStream` 消费 SSE，不能用 `EventSource`**——后者只支持 GET，无法携带 POST body 与 `Authorization` 头。
 
@@ -395,6 +400,31 @@ Celery beat 每日 02:00 触发 `mine_faq_clusters`：
 - 按问题向量相似度聚合（阈值同 6.3.1），累加 `frequency`，更新 `last_seen_at`。
 - `suggested_category` 由 DeepSeek 依据问题文本推荐一个分类（可选，失败则留空）。
 - 前端支持「一键转建知识补充任务」：生成一条 `kb_import_task`（`type=supplement`）并跳转导入中心。
+
+> 🔧 **2026-10-14 修订（落地 be-09 时对账发现，见字典 §9 #142）**
+>
+> 上面第一条的「前置过滤后 `allowed_chunks` 为空」**照字面实现是错的**。
+> be-05 落库的口径是：`allowed_ids` = **后置复核准入**的候选（`retrieval.py:282`），
+> `top_score` 也只统计准入集合（`retrieval.py:268`）。于是该条件会把两类
+> **不是知识缺口**的情况算成缺口，且不报错：
+>
+> 1. **FAQ 缓存直接作答的提问** —— 该路径根本没检索，`allowed_ids` 天然为空
+>    ⇒ 每一条被 FAQ 答上的提问都会进缺口池，而 FAQ 恰恰最不可能是知识缺口；
+> 2. **检索到了、但候选全被权限挡住** —— 知识存在，缺的是**权限**。
+>    算成缺口会让运营去补一份已经存在的材料，并把「本部门不该看到的话题」
+>    以提问文本的形式堆进治理页。
+>
+> **因此判据收窄为**（be-09 §4.2）：
+>
+> ```
+> faq_hit                  → 不是缺口（本轮没检索，无从判断）
+> 召回集为空                → 是缺口   ← 原「前置过滤后 allowed_chunks 为空」收窄到这里
+> allowed_ids 为空          → 不是缺口（有候选但全被权限挡住 ⇒ 缺权限，不是缺知识）
+> top_score < KB_MIN_SCORE → 是缺口
+> ```
+>
+> 被排除的第 2 类**不丢弃**，计入聚合日志 `skipped_by_acl` —— 它是「某部门权限配少了」
+> 的强信号，值得运营看见，只是处置动作是**调权限**而非补料，故不入缺口池。
 
 ### 6.4 文档解析与切片
 
@@ -549,7 +579,7 @@ erDiagram
 | POST | `/api/auth/login` | 账号密码登录，返回 access + refresh token | 公开 |
 | POST | `/api/auth/refresh` | 刷新 access token | 公开（校验 refresh） |
 | POST | `/api/auth/logout` | 登出，清 Redis 会话缓存 | 登录 |
-| GET | `/api/auth/me` | 当前用户信息 + 部门 + 角色 + 权限码列表 | 登录 |
+| GET | `/api/auth/me` | 当前用户信息 + 部门（自身 + 有效部门集合及其名称）+ 角色 + 权限码列表 | 登录 |
 | GET | `/api/org/departments/tree` | 部门树 | 登录 |
 | POST/PUT/DELETE | `/api/org/departments[/{id}]` | 部门增改删 | `org:department:*` |
 | GET | `/api/org/users` | 用户分页列表 | `org:user:list` |
@@ -559,6 +589,14 @@ erDiagram
 | POST/PUT/DELETE | `/api/org/roles[/{id}]` | 角色增改删 | `org:role:*` |
 | GET | `/api/org/permissions/tree` | 功能权限树 | `org:role:list` |
 | PUT | `/api/org/roles/{id}/permissions` | 角色授权 | `org:role:grant` |
+
+> ⚠️ **上表「权限」列里的 `*` 是「示意多个动作」的简写，不是字面权限码。**
+> 实际权限码一律以 [核心数据字典.md](核心数据字典.md) **§5.6** 为准 ——
+> `org:department:*` / `org:user:*` / `org:role:*` 已**作废**，展开为 13 条独立码
+> （`org:department:create|update|delete`、`org:user:list|create|update|delete|grant`、
+> `org:role:list|create|update|delete|grant`）。
+> 直接按 `*` 字面种 `sys_permission` 的后果是**前端按钮对所有人（含 `sys_admin`）静默不可见**，
+> 且前后端都不报错。三处（字典 §5.6 / 后端种子 / 前端 `PERM` 常量）必须逐字一致。
 
 **JWT 设计**
 
@@ -598,16 +636,24 @@ erDiagram
 
 ### 8.5 运营看板（新增）
 
-| 方法 | 路径 | 说明 |
-|---|---|---|
-| GET | `/api/stats/dashboard/overview` | 卡片指标：PV、UV、知识单元总数、今日提问量、FAQ 命中率 |
-| GET | `/api/stats/dashboard/trend` | 趋势：Token 消耗、提问量、平均响应时长（按日/小时） |
-| GET | `/api/stats/dashboard/top-questions` | 高频问题 TOP 榜 |
-| GET | `/api/stats/dashboard/top-knowledge` | 高频引用知识 TOP 榜 |
-| GET | `/api/stats/dashboard/latency` | 响应延时分布直方图 |
-| GET | `/api/stats/audit-logs` | 审计流水（分页 + 筛选） |
+| 方法 | 路径 | 请求参数 | 说明 |
+|---|---|---|---|
+| GET | `/api/stats/dashboard/overview` | `start_time?` `end_time?` | 卡片指标：PV、UV、知识单元总数、今日提问量、FAQ 命中率（+ 命中条数 / 权限拦截数 / 覆盖率 / 平均与 P95 延时 / 生效窗口回显） |
+| GET | `/api/stats/dashboard/trend` | `granularity?`(=day) `start_time?` `end_time?` | 趋势：Token 消耗、提问量、平均响应时长（按日/小时）。**一次返回全部指标** |
+| GET | `/api/stats/dashboard/top-questions` | `start_time?` `end_time?` `limit?`(=10) | 高频问题 TOP 榜 |
+| GET | `/api/stats/dashboard/top-knowledge` | `start_time?` `end_time?` `limit?`(=10) | 高频引用知识 TOP 榜 |
+| GET | `/api/stats/dashboard/latency` | `start_time?` `end_time?` | 响应延时分布直方图（+ 平均 / P95） |
+| GET | `/api/stats/audit-logs` | 见 §8.1 `audit-logs` | 审计流水（分页 + 筛选） |
 
-看板聚合走**预聚合表**：Celery beat 每 10 分钟把 `qa_log` 汇总进 `stats_hourly` / `stats_daily`，看板只查聚合表，避免大表实时扫描。
+**请求参数口径（✅ 2026-10-14 冻结，回填自 `P2-13-be-stats` §4.1 / 全局 #77）**：
+
+- 时间参数格式 `YYYY-MM-DD HH:mm:ss`（亦接受 `YYYY-MM-DD`），**naive Asia/Shanghai**；
+  不传时默认近 7 天（`STATS_DEFAULT_RANGE_DAYS`）。响应**回带生效后的窗口**。
+- `granularity=hour` 只允许查近 7 天，超窗返回 1001。
+- `limit` 默认 10、上限 `STATS_TOP_N`(50)。
+- **无数据返回零值 / 空数组，不返回 404**（看板允许空态）。
+
+看板聚合走**预聚合表**：Celery beat 每 10 分钟把 `qa_log` 汇总进 `stats_hourly` / `stats_daily`（§7.2 字段见字典 §2.5），看板只查聚合表，避免大表实时扫描。除 `overview` 的「知识单元总数」外，5 个端点**不得触碰 `qa_log`**。
 
 ---
 

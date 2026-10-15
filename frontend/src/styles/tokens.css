@@ -1,0 +1,87 @@
+/**
+ * 设计令牌 —— 全项目**唯一**允许出现十六进制色值的文件。
+ *
+ * 组件与页面一律写 var(--kb-*)，禁止硬编码（P1-01-fe-login spec §3.4 验收项）。
+ * 命名规则：pencil 原型里的 $bg-card → --kb-bg-card，机械 1:1 映射。
+ */
+:root {
+  /* 品牌 */
+  --kb-brand: #2f6fed;
+  --kb-brand-hover: #5b8def;
+  --kb-brand-soft: #eaf1fe;
+  --kb-brand-softer: #f4f8ff;
+
+  /* 背景 */
+  --kb-bg-page: #f5f7fa;
+  --kb-bg-card: #ffffff;
+  --kb-bg-subtle: #fafbfc;
+
+  /* 侧栏 / 品牌面板 */
+  --kb-sidebar: #1d2a3a;
+  --kb-sidebar-hover: #28374a;
+  --kb-sidebar-text: #93a3b8;
+  --kb-sidebar-active: #ffffff;
+  /* 侧栏底部分隔线。原型 S5mE0Z/Divider 是硬编码 #2A3A4E，此处收编为令牌 */
+  --kb-sidebar-divider: #2a3a4e;
+
+  /* 品牌底上的文字。原型 OXIKJ/xQ8tG 的 BtnUpload 把图标与文字硬编码为 #FFFFFF，
+     与 --kb-bg-card / --kb-sidebar-active 恰好同值但不是同一语义，故单列一条 */
+  --kb-text-on-brand: #ffffff;
+
+  /* 文字 */
+  --kb-text-primary: #1f2d3d;
+  --kb-text-secondary: #5e6d82;
+  --kb-text-muted: #93a0b0;
+  --kb-text-placeholder: #b4becc;
+
+  /* 描边 */
+  --kb-border: #e4e8ee;
+  --kb-border-soft: #eef1f5;
+
+  /* 语义色 */
+  --kb-success: #10b981;
+  --kb-success-soft: #e7f7f1;
+  --kb-warning: #f59e0b;
+  --kb-warning-soft: #fef3e2;
+  --kb-danger: #ef4444;
+  --kb-danger-soft: #fdecec;
+
+  /* 权限受限气泡（fe-03 问答页）。
+     原型 XA7T8/BlockedBubble 的描边与文字色是画布里的硬编码值（#F5D9A8 / #8A5A12），
+     按「颜色一律走令牌」收编到此处，组件里不得再出现这两个十六进制。 */
+  --kb-warning-border: #f5d9a8;
+  --kb-warning-text: #8a5a12;
+
+  /* 投影。图表提示框（fe-05）用 ECharts 的 `extraCssText` 拼 CSS 字符串，
+     它同 `color` 一样**不吃 `var()`**，所以投影响值必须收编到令牌里，
+     再由 `views/dashboard/echarts.ts` 的 `token()` 读出来 —— 否则那个 rgba 会落在 TS 文件里。 */
+  --kb-shadow-tooltip: 0 4px 12px rgba(31, 45, 61, 0.12);
+
+  /* 字体 */
+  --kb-font:
+    'Noto Sans SC', system-ui, -apple-system, 'Segoe UI', Roboto, 'PingFang SC',
+    'Hiragino Sans GB', 'Microsoft YaHei', sans-serif;
+
+  /* ---- Element Plus 主题接入 ----
+     让 el-* 组件跟随同一套品牌色，避免出现两套蓝。 */
+  --el-color-primary: var(--kb-brand);
+  --el-color-primary-light-3: var(--kb-brand-hover);
+  --el-color-primary-light-5: #8fb2f4;
+  --el-color-primary-light-7: #bfd3f9;
+  --el-color-primary-light-8: #d6e2fb;
+  --el-color-primary-light-9: var(--kb-brand-soft);
+  --el-color-primary-dark-2: #2559be;
+  --el-color-success: var(--kb-success);
+  --el-color-warning: var(--kb-warning);
+  --el-color-danger: var(--kb-danger);
+  --el-color-error: var(--kb-danger);
+  --el-text-color-primary: var(--kb-text-primary);
+  --el-text-color-regular: var(--kb-text-secondary);
+  --el-text-color-secondary: var(--kb-text-muted);
+  --el-text-color-placeholder: var(--kb-text-placeholder);
+  --el-border-color: var(--kb-border);
+  --el-border-color-light: var(--kb-border-soft);
+  --el-border-color-lighter: var(--kb-border-soft);
+  --el-fill-color-blank: var(--kb-bg-card);
+  --el-font-family: var(--kb-font);
+}

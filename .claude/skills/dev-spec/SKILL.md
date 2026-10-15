@@ -22,7 +22,8 @@ description: |
 2. `CLAUDE.md` —— 编码约定（分层铁律、安全红线、检索要点、已知坑）
 3. `vibecoding_doc/开发过程总纲.md` —— 本 skill 遵循的元流程与门禁
 4. `vibecoding_doc/核心数据字典.md` —— 表/对象/类/核心字段的统一字典，spec 的「涉及的表」「API 契约字段」从这里取
-5. 对应 spec 模板（见下方「引用文件」）
+5. `vibecoding_doc/模块概要设计/README.md` —— 模块级设计的索引与统一模板；再按编号打开承载本次需求的模块文档
+6. 对应 spec 模板（见下方「引用文件」）
 
 ## 流程（严格按此顺序，禁止跳过 spec 直接写代码）
 
@@ -34,10 +35,11 @@ description: |
 
 ### 第 2 步：生成 spec 文件
 
-- 路径：`specs/{P1|P2|P3}-{NN}-{fe|be}-{名称}.md`（命名规则见总纲 §2）
+- 路径：`vibecoding_doc/specs/{P1|P2|P3}-{NN}-{fe|be}-{名称}.md`（命名规则见总纲 §2）
+  ——该目录不存在就创建；spec 与 PRD、概要设计同属设计资产，统一收在 `vibecoding_doc/` 下
 - 内容：完整填写模板所有字段，**不准留空**。查不到的字段标「待确认」，
   并把需要用户答复的问题列在 spec 末尾。
-- 先检查 `specs/` 是否已有相关 spec，避免重复创建或覆盖既有设计。
+- 先检查 `vibecoding_doc/specs/` 是否已有相关 spec，避免重复创建或覆盖既有设计。
 - **只生成 spec 时不得写业务代码**；实现必须等用户评审通过后单独开始。
 - 硬约束必须落进 spec（见下方「硬约束速查」），不能只写「参考 CLAUDE.md」。
 
@@ -95,5 +97,6 @@ description: |
 |---|---|
 | `vibecoding_doc/开发过程总纲.md` | 元流程与门禁、spec 命名与生命周期 |
 | `vibecoding_doc/核心数据字典.md` | 表/对象/类/核心字段的统一字典（spec 字段唯一引用源） |
+| `vibecoding_doc/模块概要设计/README.md` | 模块级设计索引 + 统一模板；含 9 后端 + 6 前端模块文档（spec 的结构唯一引用源） |
 | `vibecoding_doc/spec-templates/前端页面spec模板.md` | 前端页面 spec 模板 |
 | `vibecoding_doc/spec-templates/后端模块spec模板.md` | 后端模块 spec 模板 |

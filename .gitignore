@@ -38,3 +38,10 @@ uploads/
 # 系统
 .DS_Store
 Thumbs.db
+
+
+.venv-bge/
+
+vibecoding_doc
+
+.claude

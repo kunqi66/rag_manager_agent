@@ -1,0 +1,43 @@
+/* 全局基础样式。只放真正全局的东西，具体页面样式一律写在各自 SFC 的 scoped 里。 */
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#app {
+  height: 100%;
+  margin: 0;
+}
+
+body {
+  font-family: var(--kb-font);
+  color: var(--kb-text-primary);
+  background: var(--kb-bg-page);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+/* 已登录页面的统一骨架：`PageTopbar`（60 高） + 可滚动内容区。
+   放在全局而非各页 scoped，是因为 5 个页面的骨架完全同构（原型各屏的 Main 节点一致）——
+   复制 5 份 scoped 样式必然会有人改歪其中一份。
+   尺寸取自 fe-02 原型 `OXIKJ/Main`：Body gap 16 padding [18,20]。 */
+.app-page {
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+
+.app-page__body {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: auto;
+  padding: 18px 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}

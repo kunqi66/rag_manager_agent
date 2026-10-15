@@ -3,6 +3,14 @@
 # 启动：docker compose up -d
 # 首次启动 Milvus 需要 60-90 秒完成初始化，用 docker compose ps 观察 healthy。
 #
+# 启动顺序：mysql healthy → **migrate**（一次性，跑 `alembic upgrade head`）
+#   → migrate 成功退出后 api / worker / beat 才启动 → api healthy → nginx。
+# 看到 `rag-migrate` 的状态是 **Exited (0)** 是**正常的**，它就是跑完即退。
+# 迁移失败时业务服务一律不启动（这是刻意的：schema 不对时「起来了」比「没起来」更难查）。
+#   排障：docker compose ps -a        # 看 migrate 的退出码
+#         docker compose logs migrate # 看 alembic 的报错原文
+#         curl -s localhost:8000/ready # 确认 schema 就绪（200 就绪 / 503 未就绪）
+#
 # ⚠️ 内存预算（PRD §11.3 R4）：Milvus ~4G + MySQL ~1G + Redis ~0.3G
 #    + API/worker/beat ~1.5G + Nginx ~0.1G ≈ 7G。
 #    因此 ECS 至少 4核8G。若为 2C4G，必须把 Milvus 拆到独立机器。
@@ -135,6 +143,44 @@ services:
 
   # ==================== 业务服务 ====================
 
+  # 一次性迁移。跑完即退出，正常结果是 **Exited (0)**，不是 Up。
+  #
+  # 🔴 存在的理由：`alembic upgrade` 此前**没有任何调用点** —— 不在 Dockerfile 里、
+  #    不在 API 的 lifespan 里、也不在 mysql 的 init 脚本里（那个脚本只设字符集）。
+  #    于是库里停在 0002，而代码已经到 0007：进程能起来、`/health` 回 ok，
+  #    直到用户提问才 500（`sys_audit_log` 缺失会让**每个写操作整体失败**）。
+  #    这个「缺口」就是当初「启动就报错、MySQL 里缺表」的根因。
+  #
+  # 🔴 为什么是**独立的一次性服务**，而不是让 api / worker / beat 各自跑一遍：
+  #    迁移不是幂等热路径。四个进程同时 `upgrade head` 会并发跑 DDL，
+  #    而 0007 含 `add_column` + `add_index`，重复执行直接报「列已存在」；
+  #    更糟的是 `--reload` 或滚动更新会把这段竞态**反复**触发。
+  #    一个写者、跑完即退，是这里唯一稳的形状。
+  #
+  # 🔴 为什么不让 FastAPI 在 lifespan 里 `create_all()` / 自动 upgrade：
+  #    schema 的写入者只能有一个（本服务）。放在 API 里，本地 `--reload` 每次
+  #    改代码都会试图改库，多副本部署时更是几个进程抢着改同一个 schema。
+  migrate:
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
+    container_name: rag-migrate
+    # 跑完就退，**不要**重启 —— 失败时重启只会把同一条 SQL 错误刷屏，
+    # 而正确处置是「看日志、改问题、重新 up」。`restart: on-failure` 会让
+    # `service_completed_successfully` 永不满足，业务服务随之永远起不来。
+    restart: "no"
+    command: ["alembic", "-c", "/app/alembic.ini", "upgrade", "head"]
+    env_file: [.env]
+    environment:
+      # 🔴 必须覆盖：.env 里的 MYSQL_HOST 指的是**开发机的云端实例**，
+      #    容器里要连的是 compose 的 mysql 服务。漏掉这一行，迁移会跑去改
+      #    运行时用的那个库 —— 而那是另一套数据（且那台机器只允许动 rag_kb）。
+      MYSQL_HOST: mysql
+    depends_on:
+      mysql:
+        condition: service_healthy
+    networks: [rag_net]
+
   api:
     build:
       context: .
@@ -151,12 +197,31 @@ services:
       # 仅绑定回环，仅供 ECS 本机排障；外部流量一律走 Nginx
       - "127.0.0.1:8000:8000"
     depends_on:
+      # 🔴 `service_completed_successfully` 而非 `service_started`：
+      #    要的是「迁移**成功**」这个结果，不是「迁移启动了」。写成 started 的话，
+      #    迁移还在跑（或已经失败退出）API 就起来了，等于没加这道闸。
+      migrate:
+        condition: service_completed_successfully
       mysql:
         condition: service_healthy
       redis:
         condition: service_healthy
       milvus:
         condition: service_healthy
+    healthcheck:
+      # 用镜像自带的 Python 标准库，不装 curl（slim 镜像里没有）。
+      # 打 `/ready` 而不是 `/health`：后者只证明进程活着，缺表时照样 200。
+      # 503 会让 urlopen 抛 HTTPError ⇒ 非零退出码 ⇒ 判定 unhealthy。
+      test:
+        - CMD
+        - python
+        - -c
+        - "import urllib.request as u, sys; sys.exit(0 if u.urlopen('http://127.0.0.1:8000/ready', timeout=5).status == 200 else 1)"
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      # 给 lifespan 的 schema 检查 + FAQ 装载留出时间，否则启动期会被误判为 unhealthy
+      start_period: 40s
     networks: [rag_net]
 
   worker:
@@ -164,6 +229,7 @@ services:
       context: .
       dockerfile: backend/Dockerfile
     container_name: rag-worker
+    # ⚠️ Linux 容器里可以用默认 prefork 池；Windows 上**本机**跑 worker 必须 `-P solo`。
     restart: unless-stopped
     command: ["celery", "-A", "backend.tasks", "worker", "-l", "info", "--concurrency=2"]
     env_file: [.env]
@@ -172,6 +238,10 @@ services:
       MILVUS_HOST: milvus
       REDIS_HOST: redis
     depends_on:
+      # worker 是**写库**的（导入流水线、缺口聚合），schema 未就绪时它不会「起不来」，
+      # 只会在任务里一条条失败 —— 同样要靠 migrate 挡住。
+      migrate:
+        condition: service_completed_successfully
       mysql:
         condition: service_healthy
       redis:
@@ -193,6 +263,8 @@ services:
       MILVUS_HOST: milvus
       REDIS_HOST: redis
     depends_on:
+      migrate:
+        condition: service_completed_successfully
       redis:
         condition: service_healthy
     networks: [rag_net]
@@ -208,7 +280,11 @@ services:
       # 前端构建产物；目录不存在时 Docker 会自动创建空目录
       - ./frontend/dist:/usr/share/nginx/html/app:ro
     depends_on:
-      - api
+      # 等 API **就绪**再对外开端口。原来写的是列表形式（只保证启动顺序），
+      # 结果是 nginx 先起来、把请求转给还在做启动检查的 API，用户看到 502。
+      # 注：`depends_on` 只在**创建容器**时生效，之后重启 api 不会牵动 nginx。
+      api:
+        condition: service_healthy
     networks: [rag_net]
 
 volumes:

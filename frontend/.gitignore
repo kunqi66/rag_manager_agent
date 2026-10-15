@@ -1,0 +1,15 @@
+node_modules
+dist
+dist-ssr
+*.local
+
+# 本地环境变量（CLAUDE.md 安全红线 6：密钥/环境配置不入库）
+.env
+.env.*.local
+
+# unplugin 生成，随构建产出
+src/types/auto-imports.d.ts
+src/types/components.d.ts
+
+.DS_Store
+*.log

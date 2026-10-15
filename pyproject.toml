@@ -5,9 +5,33 @@ description = "Add your description here"
 readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
+    "aiomysql>=0.3.2",
+    "alembic>=1.20.0",
     "celery[redis]>=5.6.3",
+    "cryptography>=50.0.2",
     "fastapi>=0.143.0",
+    "httpx>=0.28.1",
+    "numpy>=2.5.4",
+    "pwdlib[argon2]>=0.3.1",
     "pydantic-settings>=2.15.0",
+    "pyjwt>=2.15.1",
+    "pymilvus>=3.0.2",
+    # 🔴 上限 1.2 是**硬约束**，不是「尽量用旧版」。见 CLAUDE.md 已知坑：
+    #    pymysql 1.2.0 起把 `escape_bytes_prefixed` / `escape_dict` 换成了
+    #    字符串毒丸（`"DO NOT IMPORT THIS!!!"`），而 aiomysql 0.3.2（当前最新）
+    #    仍在 `connection.py:418` 直接调用前者来处理 bytes 参数
+    #    ⇒ 每一个 BLOB 参数都炸 `TypeError: 'str' object is not callable`。
+    #    受害路径：qa_log.question_embedding（问答热路径）、faq、knowledge_gap。
+    #    等 aiomysql 不再引这两个名字后，才可以把上限摘掉。
+    #    守门用例：verify_search.py 的 T1-45 / T1-46 / T1-47b。
+    "pymysql<1.2",
     "python-multipart>=0.0.32",
+    "sqlalchemy[asyncio]>=2.1.4",
+    "tokenizers>=0.23.3",
     "uvicorn>=0.54.0",
+]
+
+[dependency-groups]
+dev = [
+    "httpx>=0.28.1",
 ]
